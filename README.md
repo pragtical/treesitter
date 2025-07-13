@@ -115,7 +115,7 @@ style.syntax['<name>.<subcategory>'] = { common.color '#123456' }
 ```
 
 By default, Evergreen has a fallback mechanism for a limited set of highlights.
-The fallbacks cover groups defined by Nvim (see [here](nvim-ts-highlight-groups)).
+The fallbacks cover groups defined by Nvim (see [here][nvim-ts-highlight-groups]).
 A warning is generated if any fallbacks were used.
 
 Evergreen will try to use the colors from default Lite XL syntax types
@@ -168,4 +168,4 @@ with other plugins.
 # License
 MIT
 
-[nvim-ts-highlight-groups]: https://neovim.io/doc/user/treesitter.html#_treesitter-syntax-highlighting:~:text=The%20following%20is%20a%20list%20of%20standard%20captures%20used%20in%20queries%20for%20Nvim
+[nvim-ts-highlight-groups]: https://neovim.io/doc/user/treesitter.html#treesitter-highlight-groups
