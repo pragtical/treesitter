@@ -19,7 +19,7 @@ jobs:
       version_release: ${{ steps.setup_release.outputs.version_release }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
         with: { fetch-depth: 0 }
       - name: Setup Release
         id: setup_release
@@ -54,7 +54,7 @@ jobs:
     defaults: { run: { shell: bash } }
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
         with: { fetch-depth: 0 }
       - name: Install Build Dependencies
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build gcc-aarch64-linux-gnu
@@ -83,10 +83,10 @@ jobs:
           meson install -C build-aarch64-linux --destdir "$PWD/package-aarch64-linux"
           cp package-aarch64-linux/plugins/treesitter/tree-sitter.aarch64-linux.so tree-sitter.aarch64-linux.so
       - name: Upload x86_64 Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with: { name: "Linux_x86_64", path: "tree-sitter.x86_64-linux.so" }
       - name: Upload aarch64 Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with: { name: "Linux_aarch64", path: "tree-sitter.aarch64-linux.so" }
 
   build_windows:
@@ -95,7 +95,7 @@ jobs:
     defaults: { run: { shell: bash } }
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
         with: { fetch-depth: 0 }
       - name: Install Build Dependencies
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build mingw-w64
@@ -118,7 +118,7 @@ jobs:
           meson install -C build-x86_64-windows --destdir "$PWD/package-x86_64-windows"
           cp package-x86_64-windows/plugins/treesitter/tree-sitter.x86_64-windows.dll tree-sitter.x86_64-windows.dll
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with: { name: "Windows", path: "tree-sitter.x86_64-windows.dll" }
 
   build_macos:
@@ -127,7 +127,7 @@ jobs:
     defaults: { run: { shell: bash } }
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
         with: { fetch-depth: 0 }
       - name: Install Build Dependencies
         run: brew install meson ninja
@@ -160,10 +160,10 @@ jobs:
           meson install -C build-aarch64-darwin --destdir "$PWD/package-aarch64-darwin"
           cp package-aarch64-darwin/plugins/treesitter/tree-sitter.aarch64-darwin.so tree-sitter.aarch64-darwin.so
       - name: Upload x86_64 Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with: { name: "MacOS_x86_64", path: "tree-sitter.x86_64-darwin.so" }
       - name: Upload aarch64 Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with: { name: "MacOS_aarch64", path: "tree-sitter.aarch64-darwin.so" }
 
   finalize:
@@ -172,10 +172,10 @@ jobs:
     environment: Release
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
         with: { fetch-depth: 0 }
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with: { path: "." }
       - name: Perform Release
         env:
