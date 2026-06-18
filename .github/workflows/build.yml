@@ -1,5 +1,14 @@
 name: CI
-on: { push: { branches: [master, main] } }
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Version tag to publish, for example v0.5.0. Leave empty for continuous only."
+        required: false
+        type: string
 permissions: write-all
 
 jobs:
@@ -7,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.setup_release.outputs.version }}
+      version_release: ${{ steps.setup_release.outputs.version_release }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -15,11 +25,21 @@ jobs:
         id: setup_release
         env: { GITHUB_TOKEN: "${{ github.token }}" }
         run: |
+          VERSION_TAG="${{ inputs.release_tag }}"
+          if [[ -z "$VERSION_TAG" ]]; then
+            VERSION_TAG=$(git tag --points-at HEAD --list "v*" | sort -V | tail -n 1)
+          fi
           VERSION=$(git describe --tags --match "v*" 2>/dev/null | tail -c +2)
           VERSION=${VERSION:-0.4.0}
+          if [[ -n "$VERSION_TAG" ]]; then
+            VERSION=${VERSION_TAG#v}
+            echo "version_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_release=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building treesitter version $VERSION."
-          if [[ $(git tag --points-at HEAD | head -c 1) == "v" ]]; then
+          if [[ -n "$VERSION_TAG" ]]; then
             gh release delete -y "v$VERSION" || true
             gh release create -t "v$VERSION" "v$VERSION"
             gh release delete -y latest || true
@@ -161,7 +181,7 @@ jobs:
         env:
           GITHUB_TOKEN: "${{ github.token }}"
         run: |
-          if [[ $(git tag --points-at HEAD | head -c 1) == "v" ]]; then
+          if [[ "${{ needs.version.outputs.version_release }}" == "true" ]]; then
             gh release upload "v${{ needs.version.outputs.version }}" Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
             gh release upload latest Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
             git branch -f latest HEAD
