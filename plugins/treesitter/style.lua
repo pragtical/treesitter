@@ -1,7 +1,7 @@
 local core = require 'core'
 local style = require 'core.style'
 
-local config = require 'plugins.evergreen.config'
+local config = require 'plugins.treesitter.config'
 
 local fallbackMap = {
 	['normal'] = {
@@ -154,9 +154,9 @@ local function refreshSyntaxColors()
 		table.sort(missing)
 
 		core.warn(string.format(
-			'Fallbacks were used for %d colors for Evergreen highlighting.\n\z
+			'Fallbacks were used for %d colors for Tree-sitter highlighting.\n\z
 			Disable this message by setting the warnFallbackColors option \z
-			in the module plugins.evergreen.config to false, \z
+			in the module plugins.treesitter.config to false, \z
 			or by specifying all the following syntax colors: \n\t%s',
 			#missing, table.concat(missing, '\n\t')
 		))

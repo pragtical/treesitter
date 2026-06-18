@@ -1,7 +1,7 @@
-local config = require 'plugins.evergreen.config'
-local languages = require 'plugins.evergreen.languages'
-local util = require 'plugins.evergreen.util'
-local ts = require 'libraries.tree_sitter'
+local config = require 'plugins.treesitter.config'
+local languages = require 'plugins.treesitter.languages'
+local util = require 'plugins.treesitter.util'
+local ts = require 'plugins.treesitter.tree_sitter'
 
 local M = {}
 
@@ -175,6 +175,8 @@ local disabledCaptures = {
 	'nospell',
 }
 
+local warnedTimeoutRuntime = false
+
 --- @param doc core.doc
 function M.init(doc)
 	if not doc.filename then return end
@@ -195,16 +197,27 @@ function M.init(doc)
 
 	local parser = ts.Parser.new()
 	parser:set_language(lang)
+	if not parser:set_timeout_micros(config.maxParseTime) then
+		if not warnedTimeoutRuntime then
+			core.warn(
+			'Treesitter runtime %s does not support parse timeouts. \z
+			Install or configure the bundled Treesitter runtime to avoid blocking syntax parsing.',
+				ts.runtime
+			)
+			warnedTimeoutRuntime = true
+		end
+		return
+	end
 
 	doc.treesit = true
 	doc.ts = {
 		parser = parser,
-		tree = parser:parse(nil, util.input(doc.lines)),
+		tree = nil,
+		reparse = true,
+		running = false,
 		query = query,
 		runner = ts.Query.Runner.new(predicatesFor(doc)),
 	}
-
-	parser:set_timeout_micros(config.maxParseTime)
 end
 
 

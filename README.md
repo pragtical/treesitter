@@ -1,171 +1,137 @@
-# Evergreen
-> 🌳 Treesitter support for Lite XL.
+# Treesitter
 
-Evergreen adds Treesitter syntax highlighting support for Lite XL.
-It is work in progress, but functions well.
+Tree-sitter syntax highlighting for [Pragtical](https://pragtical.dev), using a
+direct LuaJIT FFI binding to the Tree-sitter C runtime.
 
-> [!NOTE]
-> Evergreen is only extensively tested on Linux,
-> but it should work correctly on MacOS and Windows based on brief testing.
+## Requirements
 
-# Showcase
+- Pragtical built with LuaJIT.
+- A Tree-sitter runtime library. Plugin-manager installs use the bundled
+  runtime asset for the current platform.
+- Language parser plugins, such as `treesitter_lua` or `treesitter_c`.
 
-| Without Evergreen                              | With Evergreen                                 |
-| ---------------------------------------------- | ---------------------------------------------- |
-| ![](before.png)                                |                                 ![](after.png) |
+## Install
 
-# Requirements
-- [Lite XL](https://lite-xl.com) 2.1+ or [Pragtical](https://pragtical.dev)
-- `lua_tree_sitter` library
+With Pragtical's plugin manager:
 
-# Installation
-## Plugin Manager
+```sh
+pragtical pm install treesitter
+```
 
-### Miq
-Evergreen can be easily installed with [Miq](https://github.com/TorchedSammy/Miq) by
-adding this to your plugin declaration:
+For local development, symlink the plugin directory:
+
+```sh
+ln -sfn /path/to/treesitter/plugins/treesitter ~/.config/pragtical/plugins/treesitter
+```
+
+## Runtime Loading
+
+Treesitter loads the Tree-sitter runtime in this order:
+
+1. A bundled/downloaded runtime in the plugin directory, for example
+   `tree-sitter.x86_64-linux.so`.
+2. `config.plugins.treesitter.treeSitterRuntimePath`, or `TREESITTER_RUNTIME`.
+3. A system Tree-sitter library available to the platform loader.
+
+The runtime should export `ts_parser_set_timeout_micros`. If it does not, the
+plugin disables Tree-sitter highlighting for the document instead of allowing a
+parse to block the editor.
+
+## Language Support
+
+Install language packages from
+[pragtical/treesitter-languages](https://github.com/pragtical/treesitter-languages):
+
+```sh
+pragtical pm repo add https://github.com/pragtical/treesitter-languages.git:master
+pragtical pm install treesitter_lua
+pragtical pm install treesitter_c
+```
+
+Language packages register parser libraries and highlight queries with:
+
 ```lua
-{'Evergreen-lxl/Evergreen.lxl'},
+require "plugins.treesitter.languages"
 ```
 
-### lpm / ppm
-Evergreen can be installed using [lpm](https://github.com/lite-xl/lite-xl-plugin-manager)
-for Lite XL or [ppm](https://github.com/pragtical/plugin-manager) for Pragtical:
-```
-lpm install evergreen
-ppm install evergreen
-```
+## Manual Language Definition
 
-## Manual
-- Git clone Evergreen into Lite XL plugins directory
-- Or symlink:  
-```
-cd ~/Downloads
-git clone https://github.com/Evergreen-lxl/Evergreen.lxl
-ln -s ~/Downloads/Evergreen.lxl ~/.config/lite-xl/plugins/evergreen
-```
+You can register a parser and query manually from your user module:
 
-## `lua_tree_sitter` Installation
-### Plugin Manager
-
-Plugin managers will handle the installation of the `lua_tree_sitter` library
-automatically.
-
-### Manual Install
-
-You can download the library from
-[here](https://github.com/Evergreen-lxl/lite-xl-tree-sitter/releases), and then place
-it inside the `libraries/tree_sitter` directory inside your user directory.
-Rename the binary to `init.so`.
-
-# Usage
-
-## Installing support for languages
-
-### Pre-packaged plugins
-
-Automated builds for some languages are available in
-[evergreen-languages](https://github.com/Evergreen-lxl/evergreen-languages).
-Follow the instructions inside the README there to install.
-
-### Manual
-
-Languages can also be manually configured as such:
 ```lua
-local evergreenLangs = require 'plugins.evergreen.languages'
+local languages = require "plugins.treesitter.languages"
 
-evergreenLangs.addDef {
-	name = 'foo',
-	files = { '%.foo$', '%.bar$' },
-	path = '~/tree-sitter-foo',
-	soFile = 'parser{SOEXT}',
-	queryFiles = {
-		highlights = 'queries/highlights.scm',
-	},
+languages.addDef {
+  name = "foo",
+  files = { "%.foo$", "%.bar$" },
+  path = "~/tree-sitter-foo",
+  soFile = "parser{SOEXT}",
+  queryFiles = {
+    highlights = "queries/highlights.scm",
+  },
 }
 ```
 
-| Option                  | Default                    | Description
-| ----------------------  | -------------------------- | -----------
-| `name`                  |                            | identifier for the language. must be unique
-| `files`                 | `{}`                       | list of patterns that matches filenames of this language
-| `path`                  |                            | directory where the shared library and queries are located
-| `soFile`                | `'parser{SOEXT}'`          | location of the shared library inside `path`
-| `queryFiles.highlights` | `'queries/highlights.scm'` | location of the highlights query inside `path`
+Fields:
 
-For `soFile`, the placeholder `{SOEXT}` will be replaced with
-the [configured](#configuration-options) shared library extension.
+| Option | Description |
+| --- | --- |
+| `name` | Tree-sitter language name. Must be unique. |
+| `files` | Lua patterns used to match document filenames. |
+| `path` | Base directory for the parser and query files. |
+| `soFile` | Parser library path relative to `path`. `{SOEXT}` expands to `.so` or `.dll`. |
+| `queryFiles.highlights` | Highlight query path relative to `path`. |
 
-It is perfectly fine to have the parser not exist,
-as long as the `files` option is an empty list or left out.
-This implies that the language definition is only used for
-inheritance from its queries.
+Definitions without `files` can still provide inherited query text for other
+languages.
 
-## Syntax highlighting groups
+## Highlight Queries
 
-Evergreen extends the set of highlight groups that Lite XL provides.
-You can set individual colors for these groups in the `style.syntax` table,
-just as you would with regular syntax types in Lite XL:
+The plugin is designed around Neovim-style Tree-sitter highlight queries. It
+supports common highlight predicates such as `#eq?`, `#any-eq?`, `#match?`,
+`#any-match?`, `#contains?`, `#any-of?`, `#has-parent?`, and
+`#has-ancestor?`. Query inheritance comments such as `; inherits: c` are also
+handled.
+
+Capture names map directly to Pragtical syntax names. `style.lua` installs
+fallback colors for many common Tree-sitter capture groups.
+
+## Configuration
+
+Options are available under `Plugins > Treesitter` in Pragtical settings, or
+through `core.config`:
+
 ```lua
-local common = require 'core.common'
-local style = require 'core.style'
+local config = require "core.config"
 
-style.syntax['<name>'] = { common.color '#ffffff' }
-style.syntax['<name>.<subcategory>'] = { common.color '#123456' }
+config.plugins.treesitter.maxParseTime = 2000
+config.plugins.treesitter.treeSitterRuntimePath = "/path/to/libtree-sitter.so"
+config.plugins.treesitter.useFallbackColors = true
+config.plugins.treesitter.warnFallbackColors = true
 ```
 
-By default, Evergreen has a fallback mechanism for a limited set of highlights.
-The fallbacks cover groups defined by Nvim (see [here][nvim-ts-highlight-groups]).
-A warning is generated if any fallbacks were used.
+| Option | Default | Description |
+| --- | --- | --- |
+| `maxParseTime` | `2000` | Maximum parse time in microseconds before parsing is deferred. Use `0` to disable deferring. |
+| `treeSitterRuntimePath` | `nil` | Optional explicit Tree-sitter runtime path. |
+| `useFallbackColors` | `true` | Fill missing Tree-sitter capture colors from existing syntax colors. |
+| `warnFallbackColors` | `true` | Warn when fallback colors are installed. |
 
-Evergreen will try to use the colors from default Lite XL syntax types
-to set these fallbacks.
-However, due to not having a close approximate, the fallbacks for these groups
-may not make sense, and you may want to set them explicitly:
-- `diff.plus`
-- `diff.minus`
-- `diff.delta`
-- `comment.error`
-- `comment.warning`
-- `comment.todo`
-- `comment.note`
+## Development
 
-Additionally, since there are a lot of groups to give more fine-grained control,
-some may find that they do not need to set all of them explicitly.
-If you wish to disable the fallback mechanism or the warning,
-set the corresponding [configuration options](#configuration-options).
+Build the bundled runtime with Meson:
 
-## Configuration options
-
-Since v0.3.1, Evergreen supports the use of the settings GUI.
-Find the options under `Plugins > Evergreen`.
-
-Options for Evergreen can be modified in the user module:
-```lua
-local config = require 'core.config'
-
-config.plugins.evergreen.option1 = false
-config.plugins.evergreen.option2 = 1000
+```sh
+meson setup build -Darch_tuple=x86_64-linux -Ddata_dir=/
+meson compile -C build
 ```
 
-Prior to v0.3.1, options were set in the `plugins.evergreen.config`
-module instead. This is still supported but discouraged to stay consistent
-with other plugins.
+Run tests inside Pragtical:
 
-### Basic options
+```sh
+SDL_VIDEO_DRIVER=dummy pragtical test tests
+```
 
-| Option               | Default      | Description
-| -------------------- | ------------ | -----------
-| `useFallbackColors`  | `true`       | Set fallbacks for missing colors
-| `warnFallbackColors` | `true`       | Warn when fallback colors are used
+## License
 
-### Advanced options
-
-| Option               | Default      | Description
-| -------------------- | ------------ | -----------
-| `maxParseTime`       | `2000`       | Maximum time spent parsing before deferring it (in µs). Set this to 0 to disable deferring
-
-# License
 MIT
-
-[nvim-ts-highlight-groups]: https://neovim.io/doc/user/treesitter.html#treesitter-highlight-groups

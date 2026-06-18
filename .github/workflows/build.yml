@@ -1,0 +1,174 @@
+name: CI
+on: { push: { branches: [master, main] } }
+permissions: write-all
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.setup_release.outputs.version }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Setup Release
+        id: setup_release
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          VERSION=$(git describe --tags --match "v*" 2>/dev/null | tail -c +2)
+          VERSION=${VERSION:-0.4.0}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building treesitter version $VERSION."
+          if [[ $(git tag --points-at HEAD | head -c 1) == "v" ]]; then
+            gh release delete -y "v$VERSION" || true
+            gh release create -t "v$VERSION" "v$VERSION"
+            gh release delete -y latest || true
+            gh release create -t latest latest
+          fi
+          gh release delete -y continuous || true
+          gh release create -p -t 'Continuous Release' continuous
+
+  build_linux:
+    needs: [version]
+    runs-on: ubuntu-22.04
+    defaults: { run: { shell: bash } }
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install Build Dependencies
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build gcc-aarch64-linux-gnu
+      - name: Build x86_64 Linux
+        run: |
+          meson setup build-x86_64-linux --buildtype=release -Darch_tuple=x86_64-linux -Ddata_dir=/
+          meson compile -C build-x86_64-linux
+          meson install -C build-x86_64-linux --destdir "$PWD/package-x86_64-linux"
+          cp package-x86_64-linux/plugins/treesitter/tree-sitter.x86_64-linux.so tree-sitter.x86_64-linux.so
+      - name: Build aarch64 Linux
+        run: |
+          cat > aarch64-linux.ini <<'EOF'
+          [binaries]
+          c = 'aarch64-linux-gnu-gcc'
+          ar = 'aarch64-linux-gnu-ar'
+          strip = 'aarch64-linux-gnu-strip'
+
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          EOF
+          meson setup build-aarch64-linux --cross-file aarch64-linux.ini --buildtype=release -Darch_tuple=aarch64-linux -Ddata_dir=/
+          meson compile -C build-aarch64-linux
+          meson install -C build-aarch64-linux --destdir "$PWD/package-aarch64-linux"
+          cp package-aarch64-linux/plugins/treesitter/tree-sitter.aarch64-linux.so tree-sitter.aarch64-linux.so
+      - name: Upload x86_64 Artifact
+        uses: actions/upload-artifact@v4
+        with: { name: "Linux_x86_64", path: "tree-sitter.x86_64-linux.so" }
+      - name: Upload aarch64 Artifact
+        uses: actions/upload-artifact@v4
+        with: { name: "Linux_aarch64", path: "tree-sitter.aarch64-linux.so" }
+
+  build_windows:
+    needs: [version]
+    runs-on: ubuntu-latest
+    defaults: { run: { shell: bash } }
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install Build Dependencies
+        run: sudo apt-get update && sudo apt-get install -y meson ninja-build mingw-w64
+      - name: Build Windows
+        run: |
+          cat > x86_64-windows.ini <<'EOF'
+          [binaries]
+          c = 'x86_64-w64-mingw32-gcc'
+          ar = 'x86_64-w64-mingw32-ar'
+          strip = 'x86_64-w64-mingw32-strip'
+
+          [host_machine]
+          system = 'windows'
+          cpu_family = 'x86_64'
+          cpu = 'x86_64'
+          endian = 'little'
+          EOF
+          meson setup build-x86_64-windows --cross-file x86_64-windows.ini --buildtype=release -Darch_tuple=x86_64-windows -Ddata_dir=/
+          meson compile -C build-x86_64-windows
+          meson install -C build-x86_64-windows --destdir "$PWD/package-x86_64-windows"
+          cp package-x86_64-windows/plugins/treesitter/tree-sitter.x86_64-windows.dll tree-sitter.x86_64-windows.dll
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with: { name: "Windows", path: "tree-sitter.x86_64-windows.dll" }
+
+  build_macos:
+    needs: [version]
+    runs-on: macos-15-intel
+    defaults: { run: { shell: bash } }
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install Build Dependencies
+        run: brew install meson ninja
+      - name: Build x86_64 macOS
+        run: |
+          MACOSX_DEPLOYMENT_TARGET=10.11 meson setup build-x86_64-darwin --buildtype=release -Darch_tuple=x86_64-darwin -Ddata_dir=/
+          meson compile -C build-x86_64-darwin
+          meson install -C build-x86_64-darwin --destdir "$PWD/package-x86_64-darwin"
+          cp package-x86_64-darwin/plugins/treesitter/tree-sitter.x86_64-darwin.so tree-sitter.x86_64-darwin.so
+      - name: Build aarch64 macOS
+        run: |
+          cat > aarch64-darwin.ini <<'EOF'
+          [binaries]
+          c = 'clang'
+          ar = 'ar'
+          strip = 'strip'
+
+          [built-in options]
+          c_args = ['-arch', 'arm64', '-mmacosx-version-min=11.0']
+          c_link_args = ['-arch', 'arm64', '-mmacosx-version-min=11.0']
+
+          [host_machine]
+          system = 'darwin'
+          cpu_family = 'aarch64'
+          cpu = 'arm64'
+          endian = 'little'
+          EOF
+          meson setup build-aarch64-darwin --cross-file aarch64-darwin.ini --buildtype=release -Darch_tuple=aarch64-darwin -Ddata_dir=/
+          meson compile -C build-aarch64-darwin
+          meson install -C build-aarch64-darwin --destdir "$PWD/package-aarch64-darwin"
+          cp package-aarch64-darwin/plugins/treesitter/tree-sitter.aarch64-darwin.so tree-sitter.aarch64-darwin.so
+      - name: Upload x86_64 Artifact
+        uses: actions/upload-artifact@v4
+        with: { name: "MacOS_x86_64", path: "tree-sitter.x86_64-darwin.so" }
+      - name: Upload aarch64 Artifact
+        uses: actions/upload-artifact@v4
+        with: { name: "MacOS_aarch64", path: "tree-sitter.aarch64-darwin.so" }
+
+  finalize:
+    needs: [version, build_macos, build_linux, build_windows]
+    runs-on: ubuntu-latest
+    environment: Release
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with: { path: "." }
+      - name: Perform Release
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
+        run: |
+          if [[ $(git tag --points-at HEAD | head -c 1) == "v" ]]; then
+            gh release upload "v${{ needs.version.outputs.version }}" Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
+            gh release upload latest Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
+            git branch -f latest HEAD
+            git tag -f latest
+            git push -f origin refs/heads/latest
+            git push -f origin refs/tags/latest
+          fi
+          gh release upload continuous Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
+          git tag -f continuous
+          git push -f origin refs/tags/continuous

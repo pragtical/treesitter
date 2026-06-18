@@ -4,10 +4,9 @@ local core = require 'core'
 local command = require 'core.command'
 local Doc = require 'core.doc'
 local Highlight = require 'core.doc.highlighter'
-local highlights = require 'plugins.evergreen.highlights'
-local util = require 'plugins.evergreen.util'
-local ts = require 'libraries.tree_sitter'
-require 'plugins.evergreen.style'
+local highlights = require 'plugins.treesitter.highlights'
+local ts = require 'plugins.treesitter.tree_sitter'
+require 'plugins.treesitter.style'
 
 
 --- @class core.doc
@@ -50,17 +49,17 @@ function Doc:lenLines(s, e)
 end
 
 local function reparseStep(doc)
-	local newTree = doc.ts.parser:parse(doc.ts.tree, util.input(doc.lines))
+	doc.ts.source = doc.ts.source or table.concat(doc.lines)
+	local newTree = doc.ts.parser:parse_string(doc.ts.tree, doc.ts.source)
 
 	if not newTree then return true end
 
-	if newTree then
-		doc.ts.tree = newTree
-		doc.ts.reparse = false
-		doc.ts.running = false
+	doc.ts.tree = newTree
+	doc.ts.source = nil
+	doc.ts.reparse = false
+	doc.ts.running = false
 
-		doc.highlighter:reset()
-	end
+	doc.highlighter:reset()
 end
 
 local oldDocInsert = Doc.raw_insert
@@ -75,20 +74,20 @@ function Doc:raw_insert(line, col, text, undo, time)
 		local tsByte = self:lenLines(1, line - 1) + col - 1
 		local tsLine, tsCol = line - 1, col - 1
 
-		self.ts.tree:edit(
-			--[[start_byte   ]] tsByte,
-			--[[old_end_byte ]] tsByte,
-			--[[new_end_byte ]] tsByte + #text,
-			--[[start_point  ]] ts.Point.new(tsLine, tsCol),
-			--[[old_end_point]] ts.Point.new(tsLine, tsCol),
-			--[[new_end_point]] ts.Point.new(tsLine, tsCol + #text)
-		)
+		if self.ts.tree then
+			self.ts.tree:edit(
+				--[[start_byte   ]] tsByte,
+				--[[old_end_byte ]] tsByte,
+				--[[new_end_byte ]] tsByte + #text,
+				--[[start_point  ]] ts.Point.new(tsLine, tsCol),
+				--[[old_end_point]] ts.Point.new(tsLine, tsCol),
+				--[[new_end_point]] ts.Point.new(tsLine, tsCol + #text)
+			)
+		end
 
 		self.ts.reparse = true
+		self.ts.source = nil
 		self.ts.parser:reset()
-		-- try parsing once immediately, so if the document is not too large,
-		-- the highlighting can updated before the next frame
-		reparseStep(self) 
 	end
 end
 
@@ -115,18 +114,20 @@ function Doc:raw_remove(line1, col1, line2, col2, undo, time)
 
 		local tsByte = self:lenLines(1, line1 - 1) + col1 - 1
 
-		self.ts.tree:edit(
-			--[[start_byte   ]] tsByte,
-			--[[old_end_byte ]] tsByte + len,
-			--[[new_end_byte ]] tsByte,
-			--[[start_point  ]] ts.Point.new(line1 - 1, col1 - 1),
-			--[[old_end_point]] ts.Point.new(line2 - 1, col2 - 1),
-			--[[new_end_point]] ts.Point.new(line1 - 1, col1 - 1)
-		)
+		if self.ts.tree then
+			self.ts.tree:edit(
+				--[[start_byte   ]] tsByte,
+				--[[old_end_byte ]] tsByte + len,
+				--[[new_end_byte ]] tsByte,
+				--[[start_point  ]] ts.Point.new(line1 - 1, col1 - 1),
+				--[[old_end_point]] ts.Point.new(line2 - 1, col2 - 1),
+				--[[new_end_point]] ts.Point.new(line1 - 1, col1 - 1)
+			)
+		end
 
 		self.ts.reparse = true
+		self.ts.source = nil
 		self.ts.parser:reset()
-		reparseStep(self)
 	else
 		oldDocRemove(self, line1, col1, line2, col2, undo, time)
 	end
@@ -138,7 +139,11 @@ function Doc:reload()
 
 	if self.treesit then
 		self:invalidateLen()
-		self.ts.tree = self.ts.parser:parse_with(util.input(self.lines))
+		self.ts.tree = nil
+		self.ts.source = nil
+		self.ts.reparse = true
+		self.ts.running = false
+		self.ts.parser:reset()
 	end
 end
 
@@ -158,13 +163,12 @@ function Highlight:start(...)
 			end
 		end, doc)
 	end
-
-	doc.ts.parser:reset()
 end
 
 local oldTokenize = Highlight.tokenize_line
 function Highlight:tokenize_line(idx, state)
 	if not self.doc.treesit then return oldTokenize(self, idx, state) end
+	if not self.doc.ts.tree then return oldTokenize(self, idx, state) end
 	
 	local txt      = self.doc.lines[idx]
 	local row      = idx - 1
@@ -231,7 +235,7 @@ function Highlight:tokenize_line(idx, state)
 end
 
 command.add('core.docview!', {
-	['evergreen:toggle-highlighting'] = function(dv)
+	['treesitter:toggle-highlighting'] = function(dv)
 		-- check for doc.ts to not toggle on docviews that are in unsupported languages
 		if dv.doc.ts then
 			dv.doc.treesit = not dv.doc.treesit

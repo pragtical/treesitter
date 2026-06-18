@@ -1,0 +1,10 @@
+/build*/
+/package*/
+/subprojects/.wraplock
+/subprojects/tree-sitter/
+tree-sitter.*.dll
+tree-sitter.*.so
+tree-sitter.*.dylib
+libtree-sitter.*.dll
+libtree-sitter.*.so
+libtree-sitter.*.dylib

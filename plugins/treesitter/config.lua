@@ -5,10 +5,11 @@ local defaults = {
 	useFallbackColors = true,
 	warnFallbackColors = true,
 	maxParseTime = 2000,
+	treeSitterRuntimePath = os.getenv('TREESITTER_RUNTIME'),
 }
 
 local spec = {
-	name = 'Evergreen',
+	name = 'Treesitter',
 	{
 		label       = 'Use fallback colors',
 		description = 'Set fallbacks for missing colors',
@@ -35,13 +36,19 @@ local spec = {
 		min         = 0,
 		step        = 1,
 	},
+	{
+		label       = 'Tree-sitter runtime path',
+		description = 'Optional path to a Tree-sitter runtime library. Bundled runtimes are tried before system libraries when this is unset.',
+		path        = 'treeSitterRuntimePath',
+		type        = 'text',
+	},
 }
 
 for _, option in ipairs(spec) do
 	option.default = defaults[option.path]
 end
 
-defaults.config_spec     = spec
-config.plugins.evergreen = common.merge(defaults, config.plugins.evergreen)
+defaults.config_spec      = spec
+config.plugins.treesitter = common.merge(defaults, config.plugins.treesitter)
 
-return config.plugins.evergreen
+return config.plugins.treesitter

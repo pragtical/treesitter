@@ -1,9 +1,9 @@
 local core = require 'core'
 local command = require 'core.command'
 local common = require 'core.common'
-local config = require 'plugins.evergreen.config'
-local util = require 'plugins.evergreen.util'
-local ts = require 'libraries.tree_sitter'
+local config = require 'plugins.treesitter.config'
+local util = require 'plugins.treesitter.util'
+local ts = require 'plugins.treesitter.tree_sitter'
 
 local M = {
 	defs = {},
@@ -14,6 +14,15 @@ local M = {
 }
 
 local soExt = PLATFORM == 'Windows' and '.dll' or '.so'
+
+local function isAbsolutePath(path)
+	return path:find('^[/\\]') or path:find('^%a:[/\\]')
+end
+
+local function resolvePath(base, path)
+	if isAbsolutePath(path) then return path end
+	return util.joinPath { base, path }
+end
 
 function M.addDef(defOptions)
 	local def = {}
@@ -28,19 +37,20 @@ function M.addDef(defOptions)
 	local path = common.home_expand(defOptions.path)
 
 	if defOptions.files and #defOptions.files > 0 then
-		def.soFile = util.joinPath {
+		def.soFile = resolvePath(
 			path,
 			defOptions.soFile and
 				defOptions.soFile:gsub('{SOEXT}', soExt) or
 				'parser' .. soExt
-		}
+		)
 	end
 
+	local queryFiles = defOptions.queryFiles or {}
 	def.queryFiles = {}
-	def.queryFiles.highlights = util.joinPath {
+	def.queryFiles.highlights = resolvePath(
 		path,
-		defOptions.queryFiles.highlights or 'queries/highlights.scm'
-	}
+		queryFiles.highlights or 'queries/highlights.scm'
+	)
 
 	M.defs[#M.defs + 1] = def
 	M.defs[def.name] = def
@@ -103,7 +113,7 @@ function M.getQuery(def, queryType)
 		return nil
 	end
 
-	local builder = { '; EVERGREEN: BEGIN ' .. def.name .. '\n' }
+	local builder = { '; TREESITTER: BEGIN ' .. def.name .. '\n' }
 
 	while true do
 		local head = f:read '*l'
@@ -124,7 +134,7 @@ function M.getQuery(def, queryType)
 					goto continue
 				end
 
-				builder[#builder + 1] = '; EVERGREEN: INHERIT ' .. name .. '\n'
+				builder[#builder + 1] = '; TREESITTER: INHERIT ' .. name .. '\n'
 				builder[#builder + 1] = M.getQuery(M.defs[name], queryType)
 
 				::continue::
@@ -136,7 +146,7 @@ function M.getQuery(def, queryType)
 	builder[#builder + 1] = f:read '*a'
 	f:close()
 
-	builder[#builder + 1] = '; EVERGREEN: END ' .. def.name .. '\n'
+	builder[#builder + 1] = '; TREESITTER: END ' .. def.name .. '\n'
 
 	query = table.concat(builder)
 	M.queryCache[queryType][def.name] = query
@@ -148,7 +158,7 @@ end
 local queryRecents = {}
 
 command.add(nil, {
-	['evergreen:view-highlights-query'] = function()
+	['treesitter:view-highlights-query'] = function()
 		core.command_view:enter('View highlights query for language', {
 			submit = function(name)
 				local def = M.defs[name]

@@ -1,17 +1,39 @@
 {
 	"addons": [
 		{
-			"id": "evergreen",
-			"description": "🌳 Treesitter support for Lite XL.",
-			"name": "Evergreen.lxl",
+			"id": "treesitter",
+			"description": "🌳 Treesitter support for Pragtical.",
+			"name": "Treesitter",
 			"mod-version": "3",
-			"version": "0.3.1",
-			"path": ".",
-			"dependencies": {
-				"tree_sitter": {
-					"version": ">=0.1.1"
+			"version": "0.4.0",
+			"path": "plugins/treesitter",
+			"files": [
+				{
+					"arch": "x86_64-linux",
+					"url": "https://github.com/pragtical/treesitter/releases/download/latest/tree-sitter.x86_64-linux.so",
+					"checksum": "SKIP"
+				},
+				{
+					"arch": "aarch64-linux",
+					"url": "https://github.com/pragtical/treesitter/releases/download/latest/tree-sitter.aarch64-linux.so",
+					"checksum": "SKIP"
+				},
+				{
+					"arch": "x86_64-darwin",
+					"url": "https://github.com/pragtical/treesitter/releases/download/latest/tree-sitter.x86_64-darwin.so",
+					"checksum": "SKIP"
+				},
+				{
+					"arch": "aarch64-darwin",
+					"url": "https://github.com/pragtical/treesitter/releases/download/latest/tree-sitter.aarch64-darwin.so",
+					"checksum": "SKIP"
+				},
+				{
+					"arch": "x86_64-windows",
+					"url": "https://github.com/pragtical/treesitter/releases/download/latest/tree-sitter.x86_64-windows.dll",
+					"checksum": "SKIP"
 				}
-			}
+			]
 		}
 	]
 }
