@@ -117,7 +117,7 @@ function M.getQuery(def, queryType)
 
 	while true do
 		local head = f:read '*l'
-		if not head:match '%s*;' then
+		if not head or not head:match '%s*;' then
 			break
 		end
 
