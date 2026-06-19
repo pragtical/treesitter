@@ -3,25 +3,23 @@ local style = require 'core.style'
 
 local config = require 'plugins.treesitter.config'
 
+-- Capture -> base color fallbacks. These mirror Pragtical core's
+-- `map_new_syntax_colors` (data/core/init.lua) so the plugin and core agree on
+-- every shared capture. Core's map runs first and wins shared names, so an entry
+-- that disagreed here would be silently overridden; keeping them aligned makes
+-- this table reflect what is actually shown and a correct standalone fallback.
 local fallbackMap = {
 	['normal'] = {
-		'punctuation.delimiter',
-		['punctuation.bracket'] = {
-			'tag.delimiter',
-		},
-	},
-	['symbol'] = {
+		'punctuation.bracket',
 		['variable'] = {
-			'variable.builtin',
 			['variable.parameter'] = {
 				'variable.parameter.builtin',
 			},
-			['variable.member'] = {
-				'property',
-				'tag.attribute',
-			},
+			'variable.member',
 		},
-		'label',
+	},
+	['symbol'] = {
+		'property',
 	},
 	['comment'] = {
 		'string.documentation',
@@ -40,6 +38,9 @@ local fallbackMap = {
 			'markup.heading.5',
 			'markup.heading.6',
 		},
+		['attribute'] = {
+			'attribute.builtin',
+		},
 		'string.escape',
 		'keyword.coroutine',
 		'keyword.function',
@@ -54,8 +55,8 @@ local fallbackMap = {
 		['keyword.directive'] = {
 			'keyword.directive.define',
 		},
-		'punctuation.special',
 		'tag.builtin',
+		'tag.attribute',
 	},
 	['keyword2'] = {
 		['module'] = {
@@ -65,7 +66,7 @@ local fallbackMap = {
 			'type.builtin',
 			'type.definition',
 		},
-		'constructor',
+		'variable.builtin',
 		'markup.strong',
 		'markup.italic',
 		'markup.strikethrough',
@@ -73,19 +74,16 @@ local fallbackMap = {
 	},
 	['number'] = {
 		'number.float',
+		['constant'] = {
+			'constant.builtin',
+			'constant.macro',
+		},
 		['markup.list'] = {
 			'markup.list.checked',
 			'markup.list.unchecked',
 		},
 	},
 	['literal'] = {
-		['constant'] = {
-			'constant.builtin',
-			'constant.macro',
-		},
-		['character'] = {
-			'character.constant',
-		},
 		'boolean',
 	},
 	['string'] = {
@@ -94,6 +92,9 @@ local fallbackMap = {
 			'string.special.symbol',
 			'string.special.path',
 			'string.special.url',
+		},
+		['character'] = {
+			'character.constant',
 		},
 		'markup.quote',
 		'markup.math',
@@ -105,11 +106,11 @@ local fallbackMap = {
 	['operator'] = {
 		'keyword.operator',
 		'keyword.conditional.ternary',
+		'punctuation.delimiter',
+		'punctuation.special',
+		'tag.delimiter',
 	},
 	['function'] = {
-		['attribute'] = {
-			'attribute.builtin',
-		},
 		'function.builtin',
 		'function.call',
 		'function.macro',
@@ -117,6 +118,8 @@ local fallbackMap = {
 			'function.method.call',
 		},
 		'tag',
+		'label',
+		'constructor',
 		['markup.link'] = {
 			'markup.link.label',
 		},
@@ -129,22 +132,23 @@ local function setFallbacks(fallbackMap, colour, missing)
 	if not config.useFallbackColors then return {} end
 
 	for k, v in pairs(fallbackMap) do
-		-- Use rawget so a capture that only resolves through core's syntax
-		-- inheritance metatable (e.g. markup.link.url falling back to
-		-- markup.link) is still treated as unset and gets this map's explicit
-		-- color, rather than silently inheriting a different parent.
-		if type(k) == 'string' then
-			if not rawget(style.syntax, k) then
-				style.syntax[k] = colour
-				missing[#missing + 1] = k
-			end
+		local name = type(k) == 'string' and k or v
 
-			setFallbacks(v, rawget(style.syntax, k), missing)
-		else
-			if not rawget(style.syntax, v) then
-				style.syntax[v] = colour
-				missing[#missing + 1] = v
+		-- rawget so a capture that only resolves through core's syntax metatable
+		-- (e.g. markup.link.url inheriting markup.link) still gets this map's
+		-- explicit color instead of a different parent's. Only *report* it as a
+		-- fallback when the theme/core can't resolve it at all; captures that
+		-- merely inherit a base color via the metatable are fine and would
+		-- otherwise flood the warning with dozens of already-colored names.
+		if not rawget(style.syntax, name) then
+			if not style.syntax[name] then
+				missing[#missing + 1] = name
 			end
+			style.syntax[name] = colour
+		end
+
+		if type(k) == 'string' then
+			setFallbacks(v, rawget(style.syntax, name), missing)
 		end
 	end
 
