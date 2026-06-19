@@ -182,13 +182,13 @@ jobs:
           GITHUB_TOKEN: "${{ github.token }}"
         run: |
           if [[ "${{ needs.version.outputs.version_release }}" == "true" ]]; then
-            gh release upload "v${{ needs.version.outputs.version }}" Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
-            gh release upload latest Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
+            gh release upload --clobber "v${{ needs.version.outputs.version }}" Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
+            gh release upload --clobber latest Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
             git branch -f latest HEAD
             git tag -f latest
             git push -f origin refs/heads/latest
             git push -f origin refs/tags/latest
           fi
-          gh release upload continuous Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
+          gh release upload --clobber continuous Linux_x86_64/*.so Linux_aarch64/*.so MacOS_x86_64/*.so MacOS_aarch64/*.so Windows/*.dll
           git tag -f continuous
           git push -f origin refs/tags/continuous
