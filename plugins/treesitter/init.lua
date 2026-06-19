@@ -193,6 +193,7 @@ function Highlight:tokenize_line(idx, state)
 			local startPt, endPt = node:start_point(), node:end_point()
 			captures[#captures + 1] = {
 				name = capture:name(),
+				order = #captures + 1,
 				level = langTree.level,
 				startByte = node:start_byte(),
 				endByte = node:end_byte(),
@@ -208,7 +209,8 @@ function Highlight:tokenize_line(idx, state)
 		if a.startByte ~= b.startByte then return a.startByte < b.startByte end
 		if a.endByte ~= b.endByte then return a.endByte > b.endByte end
 		-- Same span: apply deeper (injected) captures last so they win.
-		return a.level < b.level
+		if a.level ~= b.level then return a.level < b.level end
+		return a.order < b.order
 	end)
 
 	for _, capture in ipairs(captures) do
