@@ -9,23 +9,6 @@ local fallbackMap = {
 		['punctuation.bracket'] = {
 			'tag.delimiter',
 		},
-		'markup.strong',
-		'markup.italic',
-		'markup.strikethrough',
-		'markup.underline',
-		['markup.heading'] = {
-			'markup.heading.1',
-			'markup.heading.2',
-			'markup.heading.3',
-			'markup.heading.4',
-			'markup.heading.5',
-			'markup.heading.6',
-		},
-		'markup.quote',
-		'markup.math',
-		['markup.raw'] = {
-			'markup.raw.block',
-		},
 	},
 	['symbol'] = {
 		['variable'] = {
@@ -49,6 +32,14 @@ local fallbackMap = {
 		'comment.note',
 	},
 	['keyword'] = {
+		['markup.heading'] = {
+			'markup.heading.1',
+			'markup.heading.2',
+			'markup.heading.3',
+			'markup.heading.4',
+			'markup.heading.5',
+			'markup.heading.6',
+		},
 		'string.escape',
 		'keyword.coroutine',
 		'keyword.function',
@@ -75,9 +66,17 @@ local fallbackMap = {
 			'type.definition',
 		},
 		'constructor',
+		'markup.strong',
+		'markup.italic',
+		'markup.strikethrough',
+		'markup.underline',
 	},
 	['number'] = {
 		'number.float',
+		['markup.list'] = {
+			'markup.list.checked',
+			'markup.list.unchecked',
+		},
 	},
 	['literal'] = {
 		['constant'] = {
@@ -88,10 +87,6 @@ local fallbackMap = {
 			'character.constant',
 		},
 		'boolean',
-		['markup.list'] = {
-			'markup.list.checked',
-			'markup.list.unchecked',
-		},
 	},
 	['string'] = {
 		'string.regexp',
@@ -99,10 +94,12 @@ local fallbackMap = {
 			'string.special.symbol',
 			'string.special.path',
 			'string.special.url',
-			['markup.link'] = {
-				'markup.link.label',
-				'markup.link.url',
-			},
+		},
+		'markup.quote',
+		'markup.math',
+		'markup.link.url',
+		['markup.raw'] = {
+			'markup.raw.block',
 		},
 	},
 	['operator'] = {
@@ -120,6 +117,9 @@ local fallbackMap = {
 			'function.method.call',
 		},
 		'tag',
+		['markup.link'] = {
+			'markup.link.label',
+		},
 	},
 }
 
@@ -129,15 +129,19 @@ local function setFallbacks(fallbackMap, colour, missing)
 	if not config.useFallbackColors then return {} end
 
 	for k, v in pairs(fallbackMap) do
+		-- Use rawget so a capture that only resolves through core's syntax
+		-- inheritance metatable (e.g. markup.link.url falling back to
+		-- markup.link) is still treated as unset and gets this map's explicit
+		-- color, rather than silently inheriting a different parent.
 		if type(k) == 'string' then
-			if not style.syntax[k] then
+			if not rawget(style.syntax, k) then
 				style.syntax[k] = colour
 				missing[#missing + 1] = k
 			end
 
-			setFallbacks(v, style.syntax[k], missing)
+			setFallbacks(v, rawget(style.syntax, k), missing)
 		else
-			if not style.syntax[v] then
+			if not rawget(style.syntax, v) then
 				style.syntax[v] = colour
 				missing[#missing + 1] = v
 			end

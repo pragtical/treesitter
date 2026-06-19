@@ -48,15 +48,21 @@ function Doc:lenLines(s, e)
 	return s == 1 and self.lenAccul[e] or self.lenAccul[e] - self.lenAccul[s - 1]
 end
 
-local function reparseStep(doc)
-	doc.ts.source = doc.ts.source or table.concat(doc.lines)
-	local newTree = doc.ts.parser:parse_string(doc.ts.tree, doc.ts.source)
+local function reparse(doc)
+	local root = doc.ts.root
+	local function shouldAbort() return doc.ts.reparse end
 
-	if not newTree then return true end
+	-- Parse the root tree and all injected sub-trees. If an edit lands while we
+	-- are parsing, the parse aborts and we restart from the (already edited)
+	-- root tree with a fresh source snapshot.
+	local completed = false
+	while not completed or doc.ts.reparse do
+		doc.ts.reparse = false
+		completed = root:parse(table.concat(doc.lines), shouldAbort)
+	end
 
-	doc.ts.tree = newTree
+	doc.ts.tree = root.trees[1]
 	doc.ts.source = nil
-	doc.ts.reparse = false
 	doc.ts.running = false
 
 	doc.highlighter:reset()
@@ -74,8 +80,8 @@ function Doc:raw_insert(line, col, text, undo, time)
 		local tsByte = self:lenLines(1, line - 1) + col - 1
 		local tsLine, tsCol = line - 1, col - 1
 
-		if self.ts.tree then
-			self.ts.tree:edit(
+		if self.ts.root.trees[1] then
+			self.ts.root:edit(
 				--[[start_byte   ]] tsByte,
 				--[[old_end_byte ]] tsByte,
 				--[[new_end_byte ]] tsByte + #text,
@@ -87,7 +93,6 @@ function Doc:raw_insert(line, col, text, undo, time)
 
 		self.ts.reparse = true
 		self.ts.source = nil
-		self.ts.parser:reset()
 	end
 end
 
@@ -114,8 +119,8 @@ function Doc:raw_remove(line1, col1, line2, col2, undo, time)
 
 		local tsByte = self:lenLines(1, line1 - 1) + col1 - 1
 
-		if self.ts.tree then
-			self.ts.tree:edit(
+		if self.ts.root.trees[1] then
+			self.ts.root:edit(
 				--[[start_byte   ]] tsByte,
 				--[[old_end_byte ]] tsByte + len,
 				--[[new_end_byte ]] tsByte,
@@ -127,7 +132,6 @@ function Doc:raw_remove(line1, col1, line2, col2, undo, time)
 
 		self.ts.reparse = true
 		self.ts.source = nil
-		self.ts.parser:reset()
 	else
 		oldDocRemove(self, line1, col1, line2, col2, undo, time)
 	end
@@ -143,7 +147,7 @@ function Doc:reload()
 		self.ts.source = nil
 		self.ts.reparse = true
 		self.ts.running = false
-		self.ts.parser:reset()
+		self.ts.root:reset()
 	end
 end
 
@@ -158,9 +162,7 @@ function Highlight:start(...)
 		doc.ts.running = true
 
 		core.add_thread(function()
-			while reparseStep(doc) do
-				coroutine.yield(0)
-			end
+			reparse(doc)
 		end, doc)
 	end
 end
@@ -177,23 +179,48 @@ function Highlight:tokenize_line(idx, state)
 	local startBuf = 0
 	state = state or string.char(0)
 
-	local cursor = ts.Query.Cursor.new(self.doc.ts.query, self.doc.ts.tree:root_node())
-	cursor:set_point_range(ts.Point.new(row, 0), ts.Point.new(row, #txt - 1))
+	-- Collect captures from the root tree and every injected sub-tree covering
+	-- this row. The FFI node wrappers alias the cursor's transient capture
+	-- buffer, so we must read each node's data immediately, before the iterator
+	-- advances; storing the capture objects to inspect later is not safe.
+	local captures = {}
+	self.doc.ts.root:forEachHighlightTree(row, function(langTree, tree)
+		local cursor = ts.Query.Cursor.new(langTree.query, tree:root_node())
+		cursor:set_point_range(ts.Point.new(row, 0), ts.Point.new(row, #txt - 1))
 
-	for capture in self.doc.ts.runner:iter_captures(cursor) do
-		local node = capture:node()
-		local name = capture:name()
+		for capture in langTree.runner:iter_captures(cursor) do
+			local node = capture:node()
+			local startPt, endPt = node:start_point(), node:end_point()
+			captures[#captures + 1] = {
+				name = capture:name(),
+				level = langTree.level,
+				startByte = node:start_byte(),
+				endByte = node:end_byte(),
+				startRow = startPt:row(),
+				startCol = startPt:column(),
+				endRow = endPt:row(),
+				endCol = endPt:column(),
+			}
+		end
+	end)
+
+	table.sort(captures, function(a, b)
+		if a.startByte ~= b.startByte then return a.startByte < b.startByte end
+		if a.endByte ~= b.endByte then return a.endByte > b.endByte end
+		-- Same span: apply deeper (injected) captures last so they win.
+		return a.level < b.level
+	end)
+
+	for _, capture in ipairs(captures) do
+		local name = capture.name
 
 		if name:find('_', 1, true) then goto continue end
 
-		local startPt = node:start_point()
-		local endPt   = node:end_point()
+		if row > capture.endRow then goto continue end
+		if row < capture.startRow then break end
 
-		if row > endPt:row() then goto continue end
-		if row < startPt:row() then break end
-
-		local startPos = startPt:row() < row and 1 or startPt:column() + 1
-		local endPos   = endPt:row() > row and #txt or endPt:column()
+		local startPos = capture.startRow < row and 1 or capture.startCol + 1
+		local endPos   = capture.endRow > row and #txt or capture.endCol
 
 		local i = #buf - 1
 		while i >= 1 and buf[i + 1] < startPos do

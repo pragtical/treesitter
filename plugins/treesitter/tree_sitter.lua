@@ -20,6 +20,13 @@ typedef struct {
 } TSPoint;
 
 typedef struct {
+	TSPoint start_point;
+	TSPoint end_point;
+	uint32_t start_byte;
+	uint32_t end_byte;
+} TSRange;
+
+typedef struct {
 	uint32_t context[4];
 	const void *id;
 	const TSTree *tree;
@@ -95,6 +102,7 @@ TSTree *ts_parser_parse(TSParser *self, const TSTree *old_tree, TSInput input);
 TSTree *ts_parser_parse_string(TSParser *self, const TSTree *old_tree, const char *string, uint32_t length);
 void ts_parser_reset(TSParser *self);
 void ts_parser_set_timeout_micros(TSParser *self, uint64_t timeout_micros);
+bool ts_parser_set_included_ranges(TSParser *self, const TSRange *ranges, uint32_t length);
 uint32_t ts_language_version(const TSLanguage *self);
 uint32_t ts_language_abi_version(const TSLanguage *self);
 
@@ -102,11 +110,16 @@ void ts_tree_delete(TSTree *self);
 TSTree *ts_tree_copy(const TSTree *self);
 TSNode ts_tree_root_node(const TSTree *self);
 void ts_tree_edit(TSTree *self, const TSInputEdit *edit);
+TSRange *ts_tree_included_ranges(const TSTree *self, uint32_t *length);
 
 const char *ts_node_type(TSNode self);
 TSPoint ts_node_start_point(TSNode self);
 TSPoint ts_node_end_point(TSNode self);
+uint32_t ts_node_start_byte(TSNode self);
+uint32_t ts_node_end_byte(TSNode self);
 TSNode ts_node_parent(TSNode self);
+uint32_t ts_node_named_child_count(TSNode self);
+TSNode ts_node_named_child(TSNode self, uint32_t child_index);
 bool ts_node_is_null(TSNode self);
 
 TSQuery *ts_query_new(const TSLanguage *language, const char *source, uint32_t source_len, uint32_t *error_offset, TSQueryError *error_type);
@@ -125,6 +138,8 @@ void ts_query_cursor_exec(TSQueryCursor *self, const TSQuery *query, TSNode node
 bool ts_query_cursor_set_point_range(TSQueryCursor *self, TSPoint start_point, TSPoint end_point);
 bool ts_query_cursor_next_match(TSQueryCursor *self, TSQueryMatch *match);
 bool ts_query_cursor_next_capture(TSQueryCursor *self, TSQueryMatch *match, uint32_t *capture_index);
+
+void free(void *ptr);
 ]]
 
 local M = {}
@@ -247,6 +262,53 @@ local function cpoint(point)
 	return getmetatable(point) == Point and point:cdata() or point
 end
 
+local Range = {}
+Range.__index = Range
+
+function Range.new(startPoint, endPoint, startByte, endByte)
+	local range = ffi.new('TSRange')
+	range.start_point = cpoint(startPoint)
+	range.end_point = cpoint(endPoint)
+	range.start_byte = startByte
+	range.end_byte = endByte
+	return setmetatable({ _range = range }, Range)
+end
+
+function Range.wrap(range)
+	local copy = ffi.new('TSRange')
+	copy.start_point = range.start_point
+	copy.end_point = range.end_point
+	copy.start_byte = range.start_byte
+	copy.end_byte = range.end_byte
+	return setmetatable({ _range = copy }, Range)
+end
+
+function Range:start_point()
+	return Point.wrap(self._range.start_point)
+end
+
+function Range:end_point()
+	return Point.wrap(self._range.end_point)
+end
+
+function Range:start_byte()
+	return tonumber(self._range.start_byte)
+end
+
+function Range:end_byte()
+	return tonumber(self._range.end_byte)
+end
+
+function Range:cdata()
+	return self._range
+end
+
+M.Range = { new = Range.new }
+
+local function crange(range)
+	return getmetatable(range) == Range and range:cdata() or range
+end
+
 local Node = {}
 Node.__index = Node
 
@@ -267,8 +329,28 @@ function Node:end_point()
 	return Point.wrap(C.ts_node_end_point(self._node))
 end
 
+function Node:start_byte()
+	return tonumber(C.ts_node_start_byte(self._node))
+end
+
+function Node:end_byte()
+	return tonumber(C.ts_node_end_byte(self._node))
+end
+
+function Node:range()
+	return Range.new(self:start_point(), self:end_point(), self:start_byte(), self:end_byte())
+end
+
 function Node:parent()
 	return wrapNode(C.ts_node_parent(self._node), self._tree)
+end
+
+function Node:named_child_count()
+	return tonumber(C.ts_node_named_child_count(self._node))
+end
+
+function Node:named_child(index)
+	return wrapNode(C.ts_node_named_child(self._node, index), self._tree)
 end
 
 local Tree = {}
@@ -296,6 +378,17 @@ function Tree:edit(startByte, oldEndByte, newEndByte, startPoint, oldEndPoint, n
 	edit.old_end_point = cpoint(oldEndPoint)
 	edit.new_end_point = cpoint(newEndPoint)
 	C.ts_tree_edit(self._ptr, edit)
+end
+
+function Tree:included_ranges()
+	local len = ffi.new('uint32_t[1]')
+	local ptr = C.ts_tree_included_ranges(self._ptr, len)
+	local ranges = {}
+	for i = 0, tonumber(len[0]) - 1 do
+		ranges[#ranges + 1] = Range.wrap(ptr[i])
+	end
+	if ptr ~= nil then ffi.C.free(ptr) end
+	return ranges
 end
 
 M.Tree = {}
@@ -362,6 +455,18 @@ end
 
 function Parser:reset()
 	C.ts_parser_reset(self._ptr)
+end
+
+function Parser:set_included_ranges(ranges)
+	if not ranges or #ranges == 0 then
+		return C.ts_parser_set_included_ranges(self._ptr, nil, 0)
+	end
+
+	local cRanges = ffi.new('TSRange[?]', #ranges)
+	for i, range in ipairs(ranges) do
+		cRanges[i - 1] = crange(range)
+	end
+	return C.ts_parser_set_included_ranges(self._ptr, cRanges, #ranges)
 end
 
 function Parser:set_timeout_micros(timeout)
@@ -456,7 +561,7 @@ function Query.new(lang, source)
 		))
 	end
 
-	local self = setmetatable({ _ptr = ffi.gc(ptr, C.ts_query_delete) }, Query)
+	local self = setmetatable({ _ptr = ffi.gc(ptr, C.ts_query_delete), source = source }, Query)
 	self._captureNames = {}
 	self._stringValues = {}
 
@@ -496,7 +601,7 @@ local function wrapMatch(match, cursor)
 	for i = 0, tonumber(match.capture_count) - 1 do
 		local cap = match.captures[i]
 		captures[#captures + 1] = {
-			node = cap.node,
+			node = wrapNode(cap.node, cursor.node._tree),
 			index = tonumber(cap.index),
 		}
 	end
@@ -543,7 +648,7 @@ function QueryCursor:next_capture()
 end
 
 function QueryCapture:node()
-	return wrapNode(self._capture.node, self._match.cursor.node._tree)
+	return self._capture.node
 end
 
 function QueryCapture:index()
@@ -577,17 +682,21 @@ function QuantifiedCapture:one_node()
 	if self.quantifier == ffi.C.TSQuantifierZero then return nil end
 	for _, cap in ipairs(self.match.captures) do
 		if cap.index == self.capture_id then
-			return wrapNode(cap.node, self.match.cursor.node._tree)
+			return cap.node
 		end
 	end
 	return nil
+end
+
+function QuantifiedCapture:id()
+	return self.capture_id
 end
 
 function QuantifiedCapture:nodes()
 	local nodes = {}
 	for _, cap in ipairs(self.match.captures) do
 		if cap.index == self.capture_id then
-			nodes[#nodes + 1] = wrapNode(cap.node, self.match.cursor.node._tree)
+			nodes[#nodes + 1] = cap.node
 		end
 	end
 	return nodes
@@ -596,8 +705,16 @@ end
 local QueryRunner = {}
 QueryRunner.__index = QueryRunner
 
-function QueryRunner.new(predicates, setup)
-	return setmetatable({ predicates = predicates, setup = setup }, QueryRunner)
+function QueryRunner.new(predicates, directives, setup)
+	if type(directives) == 'function' and setup == nil then
+		setup = directives
+		directives = nil
+	end
+	return setmetatable({
+		predicates = predicates or {},
+		directives = directives or {},
+		setup = setup,
+	}, QueryRunner)
 end
 
 local function runPredicates(runner, match)
@@ -605,6 +722,7 @@ local function runPredicates(runner, match)
 	local count = ffi.new('uint32_t[1]')
 	local steps = C.ts_query_predicates_for_pattern(query._ptr, match.pattern_index, count)
 	local i = 0
+	local metadata = {}
 
 	if runner.setup then runner.setup() end
 
@@ -612,7 +730,8 @@ local function runPredicates(runner, match)
 		local name = query:string_value_for_id(steps[i].value_id)
 		i = i + 1
 
-		local fn = runner.predicates[name]
+		local isPredicate = name:sub(-1) == '?'
+		local fn = isPredicate and runner.predicates[name] or runner.directives[name]
 		local args = {}
 		while i < tonumber(count[0]) and steps[i].type ~= ffi.C.TSQueryPredicateStepTypeDone do
 			local step = steps[i]
@@ -631,17 +750,27 @@ local function runPredicates(runner, match)
 		i = i + 1
 
 		if not fn then
-			error("missing tree-sitter query predicate '#" .. tostring(name) .. "'")
+			if isPredicate then
+				error("missing tree-sitter query predicate '#" .. tostring(name) .. "'")
+			end
+			goto continue
 		end
 
-		local ok, result = pcall(fn, unpack(args))
-		if not ok then
-			error("error while executing predicate '#" .. tostring(name) .. "': " .. tostring(result))
+		local ok, result
+		if isPredicate then
+			ok, result = pcall(fn, unpack(args))
+		else
+			ok, result = pcall(fn, metadata, unpack(args))
 		end
-		if name:sub(-1) == '?' and not result then return false end
+		if not ok then
+			error("error while executing query predicate/directive '#" .. tostring(name) .. "': " .. tostring(result))
+		end
+		if isPredicate and not result then return false, metadata end
+
+		::continue::
 	end
 
-	return true
+	return true, metadata
 end
 
 function QueryRunner:iter_captures(cursor)
@@ -652,9 +781,25 @@ function QueryRunner:iter_captures(cursor)
 			if not C.ts_query_cursor_next_capture(cursor._ptr, match, index) then return nil end
 
 			local wrapped = wrapMatch(match[0], cursor)
-			if runPredicates(self, wrapped) then
+			local ok, metadata = runPredicates(self, wrapped)
+			if ok then
 				local cap = wrapped.captures[tonumber(index[0]) + 1]
-				return setmetatable({ _capture = cap, _match = wrapped }, QueryCapture)
+				return setmetatable({ _capture = cap, _match = wrapped, metadata = metadata }, QueryCapture)
+			end
+		end
+	end
+end
+
+function QueryRunner:iter_matches(cursor)
+	return function()
+		while true do
+			local match = ffi.new('TSQueryMatch[1]')
+			if not C.ts_query_cursor_next_match(cursor._ptr, match) then return nil end
+
+			local wrapped = wrapMatch(match[0], cursor)
+			local ok, metadata = runPredicates(self, wrapped)
+			if ok then
+				return wrapped, metadata
 			end
 		end
 	end

@@ -142,4 +142,139 @@ test.describe("treesitter ffi", function()
     test.equal(def.soFile, path)
     test.equal(def.queryFiles.highlights, query_path)
   end)
+
+  test.it("loads optional injections queries", function()
+    local languages = require "plugins.treesitter.languages"
+    local base = "/tmp/treesitter-query-test"
+    local highlights_path = join_path(base, "highlights.scm")
+    local injections_path = join_path(base, "injections.scm")
+    system.mkdir(base)
+
+    local f = assert(io.open(highlights_path, "wb"))
+    f:write("((identifier) @variable)\n")
+    f:close()
+
+    f = assert(io.open(injections_path, "wb"))
+    f:write([[((comment) @injection.content
+  (#set! injection.language "comment"))
+]])
+    f:close()
+
+    languages.addDef {
+      name = "treesitter_test_injections",
+      files = { "%.treesitter-test-injections$" },
+      path = base,
+      soFile = parser_path(),
+      queryFiles = {
+        highlights = "highlights.scm",
+        injections = "injections.scm",
+      },
+    }
+
+    local def = languages.defs.treesitter_test_injections
+    test.equal(def.queryFiles.injections, injections_path)
+    test.ok(languages.getQuery(def, "injections"):find("injection.language", 1, true))
+  end)
+
+  local function make_doc(lines, abs_filename)
+    return setmetatable({
+      filename = abs_filename:match("[^/\\]+$"),
+      abs_filename = abs_filename,
+      lines = lines,
+    }, { __index = {
+      get_text = function(self, l1, c1, l2, c2)
+        if l1 == l2 then return self.lines[l1]:sub(c1, c2 - 1) end
+        local parts = { self.lines[l1]:sub(c1) }
+        for i = l1 + 1, l2 - 1 do parts[#parts + 1] = self.lines[i] end
+        parts[#parts + 1] = (self.lines[l2] or ""):sub(1, c2 - 1)
+        return table.concat(parts)
+      end,
+      lenLines = function(self, s, e)
+        if e < s then return 0 end
+        local n = 0
+        for i = s, e do n = n + #self.lines[i] end
+        return n
+      end,
+    } })
+  end
+
+  local function drive_parse(root, source)
+    local co = coroutine.create(function()
+      return root:parse(source, function() return false end)
+    end)
+    while coroutine.status(co) ~= "dead" do
+      local ok, err = coroutine.resume(co)
+      test.ok(ok, err)
+    end
+  end
+
+  test.it("parses injected languages into their own sub-trees", function()
+    test.skip_if(not ts.has_timeout, "runtime does not support parse timeouts: " .. ts.runtime)
+    test.skip_if(not USERDIR, "USERDIR is not available")
+
+    local md_dir = join_path(USERDIR, "plugins", "treesitter_markdown")
+    local css_dir = join_path(USERDIR, "plugins", "treesitter_css")
+    local so = PLATFORM == "Windows" and ".dll" or ".so"
+    test.skip_if(
+      not system.get_file_info(join_path(md_dir, "parser" .. so))
+        or not system.get_file_info(join_path(css_dir, "parser" .. so)),
+      "treesitter_markdown/treesitter_css parsers are not installed"
+    )
+
+    local languages = require "plugins.treesitter.languages"
+    local highlights = require "plugins.treesitter.highlights"
+
+    if not languages.defs.markdown then
+      languages.addDef {
+        name = "markdown",
+        files = { "%.md$" },
+        path = md_dir,
+        soFile = "parser{SOEXT}",
+        queryFiles = {
+          highlights = "queries/highlights.scm",
+          injections = "queries/injections.scm",
+        },
+      }
+    end
+    if not languages.defs.css then
+      languages.addDef {
+        name = "css",
+        files = { "%.css$" },
+        path = css_dir,
+        soFile = "parser{SOEXT}",
+        queryFiles = { highlights = "queries/highlights.scm" },
+      }
+    end
+
+    local lines = {
+      "# title\n",
+      "\n",
+      "```css\n",
+      "a { color: red; }\n",
+      "```\n",
+    }
+    local doc = make_doc(lines, "/tmp/treesitter-injection-test.md")
+    highlights.init(doc)
+    test.ok(doc.treesit, "markdown document was not recognized")
+
+    drive_parse(doc.ts.root, table.concat(lines))
+
+    local css = doc.ts.root.children.css
+    test.not_nil(css)
+    test.ok(#css.trees >= 1, "css injection produced no sub-tree")
+
+    -- The css content lives on row 3 (0-based); collect captures the injected
+    -- css tree contributes there, proving the injection is highlighted.
+    local css_captures = {}
+    doc.ts.root:forEachHighlightTree(3, function(langTree, tree)
+      if langTree.def.name ~= "css" then return end
+      local cursor = ts.Query.Cursor.new(langTree.query, tree:root_node())
+      cursor:set_point_range(ts.Point.new(3, 0), ts.Point.new(3, #lines[4] - 1))
+      for capture in langTree.runner:iter_captures(cursor) do
+        css_captures[#css_captures + 1] = capture:name()
+      end
+    end)
+
+    test.ok(#css_captures > 0, "injected css tree produced no captures on its row")
+  end)
 end)

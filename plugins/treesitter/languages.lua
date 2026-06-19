@@ -10,6 +10,7 @@ local M = {
 	langCache = {},
 	queryCache = {
 		highlights = {},
+		injections = {},
 	},
 }
 
@@ -47,10 +48,15 @@ function M.addDef(defOptions)
 
 	local queryFiles = defOptions.queryFiles or {}
 	def.queryFiles = {}
-	def.queryFiles.highlights = resolvePath(
-		path,
-		queryFiles.highlights or 'queries/highlights.scm'
-	)
+	if queryFiles.highlights ~= false then
+		def.queryFiles.highlights = resolvePath(
+			path,
+			queryFiles.highlights or 'queries/highlights.scm'
+		)
+	end
+	if queryFiles.injections then
+		def.queryFiles.injections = resolvePath(path, queryFiles.injections)
+	end
 
 	M.defs[#M.defs + 1] = def
 	M.defs[def.name] = def
@@ -102,6 +108,8 @@ function M.getLang(def)
 end
 
 function M.getQuery(def, queryType)
+	if not def.queryFiles[queryType] then return nil end
+
 	local query = M.queryCache[queryType][def.name]
 	if query then
 		return query
@@ -153,6 +161,39 @@ function M.getQuery(def, queryType)
 	core.log('Loaded ' .. def.name .. ' ' .. queryType .. ' query')
 
 	return query
+end
+
+-- Common Tree-sitter injection language names that are neither a registered
+-- definition name nor a file extension. Keys are already normalized (lower
+-- case, dashes as underscores).
+local langAliases = {
+	shell = 'bash',
+	console = 'bash',
+	sh = 'bash',
+	js = 'javascript',
+	ts = 'typescript',
+	py = 'python',
+	rb = 'ruby',
+	rs = 'rust',
+	yml = 'yaml',
+	golang = 'go',
+	cs = 'c_sharp',
+	objective_c = 'objc',
+}
+
+function M.resolveLang(name)
+	name = name and name:gsub('%s+', ''):lower():gsub('%-', '_')
+	if not name or not name:match('^[%w_]+$') then return nil end
+
+	if M.defs[name] then return name end
+
+	local alias = langAliases[name]
+	if alias and M.defs[alias] then return alias end
+
+	-- Fall back to treating the injection name as a file extension, so a fence
+	-- like ```sh resolves to whichever language registers "%.sh$" (bash).
+	local def = M.findDef('.' .. name)
+	return def and def.name or nil
 end
 
 local queryRecents = {}
