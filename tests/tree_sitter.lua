@@ -176,6 +176,19 @@ test.describe("treesitter ffi", function()
     test.ok(languages.getQuery(def, "injections"):find("injection.language", 1, true))
   end)
 
+  test.it("ignores scratch documents without absolute filenames", function()
+    local highlights = require "plugins.treesitter.highlights"
+    local doc = {
+      filename = "COMMIT_EDITMSG",
+      abs_filename = nil,
+      lines = { "commit subject\n" },
+    }
+
+    highlights.init(doc)
+
+    test.equal(doc.treesit, nil)
+  end)
+
   local function make_doc(lines, abs_filename)
     return setmetatable({
       filename = abs_filename:match("[^/\\]+$"),

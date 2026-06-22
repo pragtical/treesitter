@@ -590,7 +590,7 @@ end
 function M.init(doc)
 	if not doc.filename then return end
 
-	local langDef = languages.findDef(doc.abs_filename)
+	local langDef = languages.findDef(doc.abs_filename or doc.filename)
 	if not langDef then return end
 
 	local tree = LanguageTree.new(doc, langDef)
