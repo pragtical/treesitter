@@ -66,6 +66,7 @@ local function reparse(doc)
 	doc.ts.running = false
 
 	doc.highlighter:reset()
+	core.redraw = true
 end
 
 local oldDocInsert = Doc.raw_insert
